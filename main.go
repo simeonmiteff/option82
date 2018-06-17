@@ -8,6 +8,7 @@ import (
 
 	"github.com/client9/reopen"
 	"log"
+	"log/syslog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -19,25 +20,29 @@ import (
 func main() {
 	srcFile := flag.String("f", "", "PCAP input file")
 	srcInt := flag.String("i", "", "Capture interface")
-	outFile := flag.String("o", "", "Output log file (goes to stdout if absent)")
+	outFile := flag.String("o", "",
+		"Log file (messages go to stdout if absent)")
+	enableSyslog := flag.Bool("s", false,
+		"Output option 82 data to syslog instead of log file or stdout")
 
 	flag.Parse()
 
 	var handle *pcap.Handle = nil
+	var sysLog *syslog.Writer = nil
 
 	if *srcFile != "" && *srcInt != "" {
-		panic("Cannot input from file and network at the same time")
+		log.Fatal("Cannot input from file and network at the same time")
 	} else if *srcFile != "" {
 		var err error = nil
 		handle, err = pcap.OpenOffline(*srcFile)
 		if err != nil {
-			panic(err)
+			log.Fatalf("Problem opening pcap file: %s", err)
 		}
 	} else if *srcInt != "" {
 		var err error = nil
 		handle, err = pcap.OpenLive(*srcInt, 1600, true, pcap.BlockForever)
 		if err != nil {
-			panic(err)
+			log.Fatalf("Problem opening pcap interface: %s", err)
 		}
 	} else {
 		flag.Usage()
@@ -65,9 +70,17 @@ func main() {
 		log.SetOutput(os.Stdout)
 	}
 
+	if *enableSyslog {
+		var err error = nil
+		sysLog, err = syslog.Dial("", "", syslog.LOG_LOCAL0, "option82")
+		if err != nil {
+			log.Fatalf("Unable to connect to syslog: %s", err)
+		}
+	}
+
 	// TODO: Should be possible to override BPF rule with a flag
 	if err := handle.SetBPFFilter("udp src and dst port 67"); err != nil {
-		panic(err)
+		log.Fatalf("Unable to set BPF: %s", err)
 	} else {
 		packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
 		for packet := range packetSource.Packets() {
@@ -75,9 +88,14 @@ func main() {
 			if hasOption82 {
 				enc, err := json.Marshal(*result)
 				if err != nil {
-					panic(err)
+					log.Fatalf("Could not marshal JSON: %s", err)
 				}
-				log.Println(string(enc))
+				if *enableSyslog {
+					sysLog.Info(string(enc))
+				} else {
+					log.Println(string(enc))
+				}
+
 			}
 		}
 	}
