@@ -6,11 +6,14 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 
+	"fmt"
 	"github.com/client9/reopen"
+	"io/ioutil"
 	"log"
 	"log/syslog"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 )
 
@@ -24,6 +27,7 @@ func main() {
 		"Log file (messages go to stdout if absent)")
 	enableSyslog := flag.Bool("s", false,
 		"Output option 82 data to syslog instead of log file or stdout")
+	pidFile := flag.String("p", "", "PID file (optional)")
 
 	flag.Parse()
 
@@ -78,6 +82,13 @@ func main() {
 		}
 	}
 
+	if *pidFile != "" {
+		err := writePidFile(*pidFile)
+		if err != nil {
+			log.Fatalf("Problem writing pid file: %s", err)
+		}
+	}
+
 	// TODO: Should be possible to override BPF rule with a flag
 	if err := handle.SetBPFFilter("udp src and dst port 67"); err != nil {
 		log.Fatalf("Unable to set BPF: %s", err)
@@ -99,4 +110,32 @@ func main() {
 			}
 		}
 	}
+}
+
+// Write a pid file, but first make sure it doesn't exist with a running pid.
+// https://gist.github.com/davidnewhall/3627895a9fc8fa0affbd747183abca39
+func writePidFile(pidFile string) error {
+	// Read in the pid file as a slice of bytes.
+	piddata, err := ioutil.ReadFile(pidFile)
+	if err == nil {
+		// Convert the file contents to an integer.
+		pid, err := strconv.Atoi(string(piddata))
+		if err == nil {
+			// Look for the pid in the process list.
+			process, err := os.FindProcess(pid)
+			if err == nil {
+				// Send the process a signal zero kill.
+				err := process.Signal(syscall.Signal(0))
+				if err == nil {
+					// We only get an error if the pid isn't running,
+					// or it's not ours.
+					return fmt.Errorf("pid already running: %d", pid)
+				}
+			}
+		}
+	}
+	// If we get here, then the pidfile didn't exist,
+	// or the pid in it doesn't belong to the user running this app.
+	return ioutil.WriteFile(pidFile,
+		[]byte(fmt.Sprintf("%d", os.Getpid())), 0664)
 }
