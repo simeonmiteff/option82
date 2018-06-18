@@ -49,9 +49,7 @@ func main() {
 			log.Fatalf("Problem opening pcap interface: %s", err)
 		}
 	} else {
-		flag.Usage()
-		log.Println("Aborting: you must specify -i XOR -f")
-		os.Exit(1)
+		log.Fatal("Aborting: you must specify -i XOR -f")
 	}
 
 	if *outFile != "" {
