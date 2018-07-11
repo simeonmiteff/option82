@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"log"
 
 	"encoding/binary"
 	"encoding/hex"
